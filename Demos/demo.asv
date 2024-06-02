@@ -1,0 +1,83 @@
+clc;
+close all;
+clear all;
+
+% Load the MultiObjectTrackerKLT class
+MultiObjectTrackerKLT; % Ensure the class definition is available in your MATLAB path
+
+% Load the video
+videoFile = "test1.mp4";
+
+% Check if the file exists
+if ~isfile(videoFile)
+    error('The specified video file does not exist. Please check the file path.');
+end
+
+% Load the video
+video = VideoReader(videoFile);
+
+% Prepare for processing
+foregroundDetector = vision.ForegroundDetector('NumGaussians', 3, 'NumTrainingFrames', 50);
+blobAnalyzer = vision.BlobAnalysis('BoundingBoxOutputPort', true, 'CentroidOutputPort', true, 'MinimumBlobArea', 400);
+
+% Create video player to display results
+videoPlayer = vision.VideoPlayer('Position', [100, 100, 700, 400]);
+
+% Initialize tracking system
+tracker = MultiObjectTrackerKLT();
+
+while hasFrame(video)
+    frame = readFrame(video);
+    % Convert frame to grayscale
+    grayFrame = rgb2gray(frame);
+
+    % Detect foreground
+    foreground = step(foregroundDetector, grayFrame);
+
+    % Detect blobs
+    [bboxes, centroids] = step(blobAnalyzer, foreground);
+    
+    % Debugging: print the bounding boxes
+    disp('Bounding Boxes:');
+    disp(bboxes);
+
+    % Validate bounding boxes
+    if size(bboxes, 2) ~= 4
+        warning('Invalid bounding boxes detected. Skipping frame.');
+        continue;
+    end
+
+    % Add labels to the bounding boxes
+    labels = cell(size(bboxes, 1), 1);
+    for i = 1:size(bboxes, 1)
+        labels{i} = 'Human';
+    end
+
+    % Update tracker
+    if ~isempty(bboxes)
+        tracker.addDetections(frame, bboxes, labels);
+    end
+    tracker.track(frame);
+
+    % Retrieve tracked objects
+    tracks = tracker.getTracks();
+
+    % Fall detection logic
+    for i = 1:length(tracks)
+        bbox = tracks(i).bbox;
+        aspectRatio = bbox(3) / bbox(4);
+        if strcmp(tracks(i).label, 'Human') && aspectRatio < 0.5 % Assuming a fall results in a large aspect ratio change
+            frame = insertText(frame, bbox(1:2), 'Fall Detected', 'FontSize', 18, 'BoxColor', 'red', 'BoxOpacity', 0.6);
+        end
+        frame = insertShape(frame, 'Rectangle', bbox, 'Color', 'red');
+        frame = insertText(frame, bbox(1:2) + [0 -15], tracks(i).label, 'FontSize', 12, 'BoxColor', 'green', 'BoxOpacity', 0.6);
+    end
+
+    % Display the annotated video frame using the video player object
+    step(videoPlayer, frame);
+end
+
+% Release resources
+release(videoPlayer);
+release(foregroundDetector);
+release(blobAnalyzer);
